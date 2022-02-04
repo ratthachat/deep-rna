@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from spektral.data.utils import (
+from deep_rna.spektral.data.utils import (
     batch_generator,
     get_spec,
     prepend_none,
