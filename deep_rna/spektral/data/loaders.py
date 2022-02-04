@@ -228,7 +228,7 @@ class BatchLoader(Loader):
             y = np.array(y)
 
         output = to_batch(**packed, mask=self.mask)
-        output = sp_matrices_to_sp_tensors(output)
+        
 
         if len(output) == 1:
             output = output[0]
