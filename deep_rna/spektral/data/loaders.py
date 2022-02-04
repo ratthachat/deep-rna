@@ -7,6 +7,7 @@ from deep_rna.spektral.data.utils import (
     prepend_none,
     to_batch,
     to_tf_signature,
+    pad_jagged_array,
 )
 
 version = tf.__version__.split(".")
@@ -221,7 +222,6 @@ class BatchLoader(Loader):
         y = packed.pop("y_list", None)
         if y is not None:
             if self.mask: # padding apply
-                from spektral.utils import pad_jagged_array
                 n_max = max([yy.shape[0] for yy in y])
                 y = pad_jagged_array(y, (n_max, -1))
 
