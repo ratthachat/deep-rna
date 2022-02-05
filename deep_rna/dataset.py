@@ -1,4 +1,5 @@
 from deep_rna.spektral.data import Graph, Dataset
+from glob import glob
 
 class RNADataset(Dataset):
     """
@@ -25,16 +26,15 @@ class RNADataset(Dataset):
 				 edge_dir,
 				 label_df=None,
                  pred_len=None,
-#                  package_names=['contrafold_2'], # TODO: auto-scan sub-dirs in edge_dir. Modify the tutorial notebook
                  edge_thresh = 1e-1, 
                  num_examples=None,
                  **kwargs):
-		
+		self.rna_seq_id_list = rna_seq_id_list
+		self.node_dir = node_dir
+		self.edge_dir = edge_dir
         self.label_df = label_df
         self.edge_thresh = edge_thresh
         self.pred_len = pred_len
-        self.training = training
-        self.package_name = package_name
         self.num_examples = num_examples # optional: if you want to test only small data
         self.__dict__.update(kwargs)
 		super().__init__(**kwargs)
@@ -44,25 +44,34 @@ class RNADataset(Dataset):
     
     def read(self):        
         graph_list = []
-        for i in tqdm(range(len(rna_seq_id_list))):
-            seq_id = rna_seq_id_list[i]
-            node_feature_df = pd.read_csv(node_dir+f'{seq_id}_node_features.csv')
-            node_feature = node_feature_df.values # (seq_len, feat)
+		
+        for seq_id in tqdm(self.rna_seq_id_list):	
+            node_feature = pd.read_csv(self.node_dir+f'{seq_id}_node_features.csv').values # (seq_len, feat)
             
-            edge_matrix = np.load(edge_dir + f"{self.package_name}_{seq_id}.npy")
-            edge_matrix = np.where(edge_matrix > self.edge_thresh, edge_matrix, 0)
-            
-            node_feature = node_feature[:self.pred_len]
-            edge_matrix = edge_matrix[:self.pred_len, :self.pred_len]
+			package_dirs = glob(f"{self.edge_dir}/*/")
+			edge_matrix_list = []
+			for package_dir in package_dirs:
+            	edge_matrix = np.load(package_dir + f"/{seq_id}.npy")
+            	edge_matrix = np.where(edge_matrix > self.edge_thresh, edge_matrix, 0)
+            	edge_matrix_list.append(edge_matrix)
+				
+			if self.pred_len is not None:
+            	node_feature = node_feature[:self.pred_len]
+            	edge_matrix_list = [m[:self.pred_len, :self.pred_len] for m in edge_matrix_list]
             
             if self.label_df is not None:
                 labels = self.extract_label(seq_id)
-                labels = labels[:self.pred_len] # TOFIX, allowing different len
+				if self.pred_len:
+                	labels = labels[:self.pred_len] # TOFIX, allowing different len
             else:
                 labels = None
             
            
-            graph_list.append(Graph(x=node_feature, a=edge_matrix, y=labels))
+            graph_list.append(Graph(x=node_feature, 
+									a=None, 
+									e=np.stack(edge_matrix_list, axis=-1), 
+									y=labels)
+							 )
             
             if self.num_examples is not None and len(graph_list) == self.num_examples: 
                 break
