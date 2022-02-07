@@ -44,4 +44,4 @@ def extract_seq_pseudo_label_from_submission(submission_df, rna_seq_id, pred_col
   sub_sel_id[['dummy','seq_name', 'seq_pos']] = sub_sel_id.id_seqpos.str.split('_',expand=True)
   sub_sel_id['seq_pos'] = sub_sel_id['seq_pos'].astype(int)
   
-  return sub_sel_id.sort_values(by='seq_pos')[self.pred_cols].values
+  return sub_sel_id.sort_values(by='seq_pos')[pred_cols].values
