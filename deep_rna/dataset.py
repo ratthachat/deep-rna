@@ -1,5 +1,3 @@
-%%writefile ./deep_rna/dataset.py
-
 import numpy as np
 import pandas as pd
 from deep_rna.spektral.data import Graph, Dataset
