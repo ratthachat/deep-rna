@@ -1,8 +1,10 @@
 import numpy as np
 import pandas as pd
-from deep_rna.spektral.data import Graph, Dataset
 from glob import glob
 from tqdm.notebook import tqdm
+
+from deep_rna.spektral.data import Graph, Dataset
+from deep_rna.openvaccine_utils import extract_seq_pseudo_label_from_submission
 
 class RNADataset(Dataset):
     """
@@ -83,3 +85,7 @@ class RNADataset(Dataset):
 class RNAAutoEncoderDataset(RNADataset):        
     def extract_label(self, seq_id, **kwarg):
         return kwarg['node_feature']
+
+class RNAOpenVaccinePsuedoDataset(RNADataset):        
+    def extract_label(self, seq_id, **kwarg):
+        return extract_seq_pseudo_label_from_submission(submission_df=self.label_df, rna_seq_id=seq_id)
