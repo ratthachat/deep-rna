@@ -28,48 +28,69 @@ class RNABodySmallModel(tf.keras.Model):
         node_extra = self.gnn_layers[0]([node_embed, edge_inputs])
         node_embed = L.Concatenate()([node_embed, node_extra])
 
-
         node_embed = self.lstm(node_embed)
         node_extra = self.gnn_layers[1]([node_embed, edge_inputs])
         node_embed = L.Concatenate()([node_embed, node_extra])
         return node_embed
 
+class Conv1dBlock(tf.keras.layers.Layer):
+    def __init__(self, kernel_size=3, strides=1,hidden_dim=128):
+        super(Conv1dBlock, self).__init__()
+        self.kernel_size = kernel_size
+        self.strides = strides
+        self.hidden_dim = hidden_dim
+        
+#         self.conv_layer = L.DepthwiseConv1D(kernel_size=kernel_size, strides=strides, padding='same')
+        self.conv_layer = L.Conv1D(hidden_dim, kernel_size=kernel_size, strides=strides, padding='same')
+        self.norm_layer = L.LayerNormalization()
+#         self.inverted_layer = L.Dense(hidden_dim*1)
+        self.dense_layer = L.Dense(hidden_dim)
+        self.add_layer = L.Concatenate()#L.Add()
+    def call(self, node_feat_input):
+        node_feat = self.conv_layer(node_feat_input) # tf >= 2.7.0
+        node_feat = self.norm_layer(node_feat)
+#         node_feat = self.inverted_layer(node_feat)
+        node_feat = tf.keras.activations.gelu(node_feat, approximate=True)
+        node_feat = self.dense_layer(node_feat)
+        node_feat = self.add_layer([node_feat, node_feat_input])
+        return node_feat
+    
 class RNABodyDeepModel(tf.keras.Model):
     '''Input: Spektral's BatchLoader of [node_features, edge_features] 
               there is a mask attached in node_features[:,:,-1:]
        Output: Embeded Node Features of shape (batch, seq_len, hidden_dim)
     '''
-    def __init__(self, n_labels=5, hidden_dim=128, n_layers=2, n_edge_features=3):
+    def __init__(self, n_labels=5, hidden_dim=128, n_conv_layers=2, n_gnn_layers=2, n_edge_features=3):
         super().__init__()
 
         self.graphmask = GraphMasking()
-        self.pre_dense = L.Dense(hidden_dim,activation='linear',use_bias=False)
-        self.gru = L.Bidirectional(L.GRU(hidden_dim, dropout=0.25, return_sequences=True, kernel_initializer='orthogonal'))
-        self.lstm = L.Bidirectional(L.LSTM(hidden_dim, dropout=0.25, return_sequences=True, kernel_initializer='orthogonal'))
+        self.hidden_dim = hidden_dim
         self.n_edge_features = n_edge_features
-        self.gnn_layers = [[SimpleGCN(hidden_dim//2) for _ in range(n_edge_features)] for _ in range(n_layers)]
+        self.n_conv_layers = n_conv_layers
+        self.n_gnn_layers = n_gnn_layers
+        self.pre_dense = L.Dense(hidden_dim,activation='linear',use_bias=False)
+        self.rnn_layers = [L.Bidirectional(L.GRU(hidden_dim, dropout=0.25, return_sequences=True, kernel_initializer='orthogonal')),
+                           L.Bidirectional(L.LSTM(hidden_dim, dropout=0.25, return_sequences=True, kernel_initializer='orthogonal'))]
+        self.gnn_layers = [[SimpleGCN(hidden_dim//2) for _ in range(n_edge_features)] for _ in range(n_gnn_layers)]
+        self.conv_blocks = [Conv1dBlock() for _ in range(n_conv_layers)]
         self.mask = None
-
+    
     def call(self, inputs):
         node_inputs, edge_inputs = inputs
 
         node_inputs = self.graphmask(node_inputs)
         node_embed = self.pre_dense(node_inputs)
-
-        node_embed = self.gru(node_embed)
-        node_embed0 = node_embed
-        for i in range(self.n_edge_features):
-            edge_inputs0 = edge_inputs[..., i]
-            node_extra = self.gnn_layers[0][i]([node_embed0, edge_inputs0])
-            node_embed = L.Concatenate()([node_embed, node_extra])
-
-
-        node_embed = self.lstm(node_embed)
-        node_embed0 = node_embed
-        for i in range(self.n_edge_features):
-            edge_inputs0 = edge_inputs[..., i]
-            node_extra = self.gnn_layers[1][i]([node_embed0, edge_inputs0])
-            node_embed = L.Concatenate()([node_embed, node_extra])
+        
+        for i in range(self.n_conv_layers):
+            node_embed = self.conv_blocks[i](node_embed)
+        
+            node_embed0 = node_embed
+            for k in range(self.n_edge_features):
+                edge_inputs0 = edge_inputs[..., k]
+                node_extra = self.gnn_layers[i][k]([node_embed0, edge_inputs0])
+                node_embed = L.Concatenate()([node_embed, node_extra])
+                
+            node_embed = self.rnn_layers[i](node_embed)
         return node_embed
 
 class RNAPredictionModel(tf.keras.Model):
