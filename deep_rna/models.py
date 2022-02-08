@@ -35,11 +35,11 @@ class RNABodySmallModel(tf.keras.Model):
         return node_embed
     
 class RNAPredictionModel(tf.keras.Model):
-    def __init__(self, body_model, n_labels=5):
+    def __init__(self, body_model, n_labels=5, activation='linear'):
         super().__init__()
         
         self.body_model = body_model
-        self.final_dense = L.Dense(n_labels, 'linear')
+        self.final_dense = L.Dense(n_labels, activation)
         self.mask = None
         
     def dynamic_masked_mcrmse(self,y_true, y_pred):
@@ -109,3 +109,40 @@ class RNAPredictionModel(tf.keras.Model):
         self.compiled_loss(y, y_pred)
         self.compiled_metrics.update_state(y, y_pred)
         return {m.name: m.result() for m in self.metrics}
+    
+def RNAPretrainedModel(
+                 model_size='small',
+                 include_top=True, 
+                 weights='openvaccine', 
+                 n_labels=5,
+                 activation='linear'):
+        
+    small_model_url = "https://drive.google.com/u/0/uc?id=1Yyc_143ZQeTaCVcTCDv-WQjw6NZ8j0FT&export=download"
+
+    assert model_size == 'small' or model_size == 'deep'
+    assert n_labels > 1
+    
+    if model_size == 'small':
+        model_body = RNABodySmallModel()
+        input_shape = [(None, None, 14), (None, None, None, None)] # fix for the pretrained model
+        
+    if weights is not None:
+        model_prediction = RNAPredictionModel(model_body, n_labels=5, activation=activation)
+        model_prediction.build(input_shape = input_shape)
+        
+        file_path = tf.keras.utils.get_file(fname='model.h5',origin=small_model_url)
+        model_prediction.load_weights(file_path)
+        print('load pretrained open-vaccine weights successfully....!')
+        
+        if n_labels != 5: # change head, but with pretrained body
+            model_prediction = RNAPredictionModel(model_body, n_labels=n_label, activation=activation)
+            model_prediction.build(input_shape = input_shape)
+    else:
+        model_prediction = RNAPredictionModel(model_body, n_labels=n_label, activation=activation)
+        model_prediction.build(input_shape = input_shape)
+    
+    if include_top == False:
+        return model_body
+    
+    return model_prediction
+        
