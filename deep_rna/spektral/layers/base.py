@@ -75,14 +75,21 @@ class SimpleGCN(tf.keras.layers.Layer):
             initializer=self.kernel_initializer,
             name="kernel",
         )
-
+        
+        self.bias = self.add_weight(
+                shape=(self.units,),
+                initializer="zeros",
+                name="bias",
+        )
+        
         self.built = True
     
     def call(self, inputs, training=False, mask=None):
         node_states, adjacency = inputs
         node_states_aggregated = tf.matmul(adjacency, node_states)
         node_states_aggregated = tf.matmul(node_states_aggregated, self.kernel)
-
+        
+        node_states_aggregated += self.bias
         if mask:
             node_states_aggregated = self._apply_mask(node_states_aggregated, mask)
 
