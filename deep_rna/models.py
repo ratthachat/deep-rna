@@ -28,30 +28,34 @@ class RNABodySmallModel(tf.keras.Model):
         node_extra = self.gnn_layers[0]([node_embed, edge_inputs])
         node_embed = L.Concatenate()([node_embed, node_extra])
 
+
         node_embed = self.lstm(node_embed)
         node_extra = self.gnn_layers[1]([node_embed, edge_inputs])
         node_embed = L.Concatenate()([node_embed, node_extra])
         return node_embed
 
 class Conv1dBlock(tf.keras.layers.Layer):
-    def __init__(self, kernel_size=3, strides=1,hidden_dim=128):
+    def __init__(self, kernel_size=3, strides=1,hidden_dim=128,drop_rate=0.25):
         super(Conv1dBlock, self).__init__()
         self.kernel_size = kernel_size
         self.strides = strides
         self.hidden_dim = hidden_dim
-        
-#         self.conv_layer = L.DepthwiseConv1D(kernel_size=kernel_size, strides=strides, padding='same')
         self.conv_layer = L.Conv1D(hidden_dim, kernel_size=kernel_size, strides=strides, padding='same')
-        self.norm_layer = L.LayerNormalization()
-#         self.inverted_layer = L.Dense(hidden_dim*1)
+        self.norm_layer1 = L.LayerNormalization()
+        self.inverted_layer = L.Dense(hidden_dim*3)
         self.dense_layer = L.Dense(hidden_dim)
+        self.drop_layer = L.Dropout(drop_rate, noise_shape=[None,1,1])
         self.add_layer = L.Concatenate()#L.Add()
+        self.norm_layer2 = L.LayerNormalization()
+        
     def call(self, node_feat_input):
         node_feat = self.conv_layer(node_feat_input) # tf >= 2.7.0
-        node_feat = self.norm_layer(node_feat)
-#         node_feat = self.inverted_layer(node_feat)
+        node_feat = self.norm_layer1(node_feat)
+        node_feat = self.inverted_layer(node_feat)
         node_feat = tf.keras.activations.gelu(node_feat, approximate=True)
         node_feat = self.dense_layer(node_feat)
+        node_feat = self.norm_layer2(node_feat)
+        node_feat = self.drop_layer(node_feat)
         node_feat = self.add_layer([node_feat, node_feat_input])
         return node_feat
     
@@ -60,39 +64,68 @@ class RNABodyDeepModel(tf.keras.Model):
               there is a mask attached in node_features[:,:,-1:]
        Output: Embeded Node Features of shape (batch, seq_len, hidden_dim)
     '''
-    def __init__(self, n_labels=5, hidden_dim=128, n_conv_layers=2, n_gnn_layers=2, n_edge_features=3):
+    def __init__(self, n_labels=5, hidden_dim=128, n_layers=2, n_edge_features=5):
         super().__init__()
 
         self.graphmask = GraphMasking()
         self.hidden_dim = hidden_dim
-        self.n_edge_features = n_edge_features
-        self.n_conv_layers = n_conv_layers
-        self.n_gnn_layers = n_gnn_layers
+        self.n_edge_features = n_edge_features+1 # plus learnable edge feat
+        self.n_layers = n_layers
+        self.edge_dense = L.Dense(1,activation='relu',use_bias=False)
         self.pre_dense = L.Dense(hidden_dim,activation='linear',use_bias=False)
         self.rnn_layers = [L.Bidirectional(L.GRU(hidden_dim, dropout=0.25, return_sequences=True, kernel_initializer='orthogonal')),
                            L.Bidirectional(L.LSTM(hidden_dim, dropout=0.25, return_sequences=True, kernel_initializer='orthogonal'))]
-        self.gnn_layers = [[SimpleGCN(hidden_dim//2) for _ in range(n_edge_features)] for _ in range(n_gnn_layers)]
-        self.conv_blocks = [Conv1dBlock() for _ in range(n_conv_layers)]
+        self.gnn_layers = [[SimpleGCN(hidden_dim) for _ in range(self.n_edge_features)] for _ in range(n_layers)]
+        self.conv_blocks = [Conv1dBlock() for _ in range(n_layers)]
+        self.concat = L.Concatenate()
         self.mask = None
-    
+        
+        # OpenVaccine Recipe
+        self.conv_block6 = Conv1dBlock(kernel_size=6, hidden_dim=64,drop_rate=0.0)
+        self.conv_block15 = Conv1dBlock(kernel_size=15, hidden_dim=32,drop_rate=0.0)
+        self.conv_block30 = Conv1dBlock(kernel_size=30, hidden_dim=16,drop_rate=0.0)
+        self.ffn = [L.Dense(hidden_dim) for  _ in range(n_layers)]
+        self.attention = L.MultiHeadAttention(num_heads=2, key_dim=32)
+        self.norm_layer1 = [L.LayerNormalization() for  _ in range(self.n_edge_features)]
+        self.norm_layer2 = L.LayerNormalization()
+        
     def call(self, inputs):
         node_inputs, edge_inputs = inputs
 
         node_inputs = self.graphmask(node_inputs)
         node_embed = self.pre_dense(node_inputs)
         
-        for i in range(self.n_conv_layers):
+        node_embed_list = [node_embed]
+        node_embed_list.append(self.conv_block6(node_embed_list[-1]))
+        node_embed_list.append(self.conv_block15(node_embed_list[-1]))
+        node_embed_list.append(self.conv_block30(node_embed_list[-1]))
+        
+        node_embed = self.concat(node_embed_list)
+        node_embed_saved = node_embed
+        
+        learned_edge = self.edge_dense(edge_inputs)
+        edge_inputs = self.concat([edge_inputs, learned_edge])
+        
+        for i in range(self.n_layers):
             node_embed = self.conv_blocks[i](node_embed)
         
             node_embed0 = node_embed
             for k in range(self.n_edge_features):
                 edge_inputs0 = edge_inputs[..., k]
                 node_extra = self.gnn_layers[i][k]([node_embed0, edge_inputs0])
-                node_embed = L.Concatenate()([node_embed, node_extra])
-                
+                node_extra = self.norm_layer1[k](node_extra)
+                node_embed = self.concat([node_embed, node_extra])
+            
+            node_embed0 = self.concat([node_embed, node_embed_saved])
+            
+            node_embed = self.ffn[i](node_embed0)
+            node_embed = self.norm_layer2(node_embed)
+            node_embed = self.attention(node_embed, node_embed)
+            
+            node_embed = self.concat([node_embed, node_embed0])
             node_embed = self.rnn_layers[i](node_embed)
         return node_embed
-
+    
 class RNAPredictionModel(tf.keras.Model):
     def __init__(self, body_model, n_labels=5, activation='linear'):
         super().__init__()
@@ -183,7 +216,8 @@ def RNAPretrainedModel(
 
     if model_size == 'small':
         model_body = RNABodySmallModel()
-        input_shape = [(None, None, 14), (None, None, None, None)] # fix for the pretrained model
+        n_features = 14 # speficiation of the pretrained model
+        input_shape = [(None, None, n_features), (None, None, None, None)] 
 
     if weights is not None:
         model_prediction = RNAPredictionModel(model_body, n_labels=5, activation=activation)
