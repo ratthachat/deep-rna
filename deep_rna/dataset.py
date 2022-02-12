@@ -2,9 +2,8 @@ import numpy as np
 import pandas as pd
 from glob import glob
 from tqdm.notebook import tqdm
-
 from deep_rna.spektral.data import Graph, Dataset
-from deep_rna.openvaccine_utils import extract_seq_pseudo_label_from_submission
+from deep_rna.openvaccine_utils import extract_seq_pseudo_label_from_submission, inverse_manhattan_matrix
 
 class RNADataset(Dataset):
     """
@@ -23,6 +22,7 @@ class RNADataset(Dataset):
               seq_id and label_df
     pred_len: length of each rna string to be predicted (i.e. have labels); just in case that
               pred_len < seq_len (as in OpenVaccine) for technical difficulties in bio-experiments
+    manhattan_edge_flag: whether to add manhattan edge feature to the edge feature list or not
     """
 
     def __init__(self, 
@@ -33,6 +33,7 @@ class RNADataset(Dataset):
                 pred_len=None,
                 edge_thresh = 1e-1, 
                 num_examples=None,
+                manhattan_edge_flag=True,
                 **kwargs):
         self.rna_seq_id_list = rna_seq_id_list
         self.node_dir = node_dir
@@ -41,6 +42,7 @@ class RNADataset(Dataset):
         self.edge_thresh = edge_thresh
         self.pred_len = pred_len
         self.num_examples = num_examples # optional: if you want to test only small data
+        self.manhattan_edge_flag = manhattan_edge_flag
         self.__dict__.update(kwargs)
         super().__init__(**kwargs)
     
@@ -50,7 +52,7 @@ class RNADataset(Dataset):
     def read(self):        
         graph_list = []
 
-        for seq_id in tqdm(self.rna_seq_id_list):	
+        for seq_id in tqdm(self.rna_seq_id_list):
             node_feature = pd.read_csv(self.node_dir+f'{seq_id}_node_features.csv').values # (seq_len, feat)
             
             package_dirs = glob(f"{self.edge_dir}/*/")
@@ -63,6 +65,11 @@ class RNADataset(Dataset):
             if self.pred_len is not None:
                 node_feature = node_feature[:self.pred_len]
                 edge_matrix_list = [m[:self.pred_len, :self.pred_len] for m in edge_matrix_list]
+            
+            if self.manhattan_edge_flag:
+                N = edge_matrix_list[0].shape[1]
+                edge_matrix_list.append(inverse_manhattan_matrix(N, power=1))
+                edge_matrix_list.append(inverse_manhattan_matrix(N, power=2))
             
             if self.label_df is not None:
                 labels = self.extract_label(seq_id, node_feature=node_feature)
