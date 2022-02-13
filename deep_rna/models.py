@@ -47,7 +47,6 @@ class Conv1dBlock(tf.keras.layers.Layer):
         self.drop_layer = L.Dropout(drop_rate, noise_shape=[None,1,1])
         self.add_layer = L.Concatenate()#L.Add()
         self.norm_layer2 = L.LayerNormalization()
-        
     def call(self, node_feat_input):
         node_feat = self.conv_layer(node_feat_input) # tf >= 2.7.0
         node_feat = self.norm_layer1(node_feat)
@@ -127,11 +126,12 @@ class RNABodyDeepModel(tf.keras.Model):
         return node_embed
     
 class RNAPredictionModel(tf.keras.Model):
-    def __init__(self, body_model, n_labels=5, activation='linear'):
+    def __init__(self, body_model, n_labels=5, activation='linear', class_weight = None):
         super().__init__()
 
         self.body_model = body_model
         self.final_dense = L.Dense(n_labels, activation)
+        self.class_weight = class_weight
         self.mask = None
 
     def dynamic_masked_mcrmse(self,y_true, y_pred):
@@ -139,12 +139,16 @@ class RNAPredictionModel(tf.keras.Model):
         # self.mask needs to be dynamically updated for each batch
         # here, we provide two possible losses
         def mcrmse(y_true, y_pred):
+            
             loss_square = tf.square(y_true - y_pred)
             if self.mask is not None:
                 mask = tf.cast(self.mask,tf.float32)
                 loss_square *= tf.expand_dims(mask,axis=-1)
             colwise_mse = tf.reduce_mean(loss_square, axis=(0, 1))
-
+            if self.class_weight is not None:
+                # assert len(colwise_mse) == len(self.class_weight)
+                colwise_mse *= self.class_weight
+            
             mask_shape = tf.shape(mask)
             padded_total = tf.cast(mask_shape[0]*mask_shape[1], tf.float32)
             normalized = padded_total/tf.math.reduce_sum(mask)
@@ -207,7 +211,8 @@ def RNAPretrainedModel(
                  include_top=True, 
                  weights='openvaccine', 
                  n_labels=5,
-                 activation='linear'):
+                 activation='linear',
+                 class_weight=None):
 
     small_model_url = "https://drive.google.com/u/0/uc?id=1Yyc_143ZQeTaCVcTCDv-WQjw6NZ8j0FT&export=download"
 
@@ -220,7 +225,7 @@ def RNAPretrainedModel(
         input_shape = [(None, None, n_features), (None, None, None, None)] 
 
     if weights is not None:
-        model_prediction = RNAPredictionModel(model_body, n_labels=5, activation=activation)
+        model_prediction = RNAPredictionModel(model_body, n_labels=5, activation=activation,class_weight=class_weight)
         model_prediction.build(input_shape = input_shape)
 
         file_path = tf.keras.utils.get_file(fname='model.h5',origin=small_model_url)
