@@ -126,27 +126,33 @@ class RNABodyDeepModel(tf.keras.Model):
         return node_embed
     
 class RNAPredictionModel(tf.keras.Model):
-    def __init__(self, body_model, n_labels=5, activation='linear', class_weight = None):
+    def __init__(self, body_model, n_labels=5, activation='linear', class_weight = None, sample_weight_flag=False):
         super().__init__()
 
         self.body_model = body_model
         self.final_dense = L.Dense(n_labels, activation)
         self.class_weight = class_weight
+        self.sample_weight_flag = sample_weight_flag
         self.mask = None
+        self.sample_weight = None
 
     def dynamic_masked_mcrmse(self,y_true, y_pred):
 
         # self.mask needs to be dynamically updated for each batch
         # here, we provide two possible losses
         def mcrmse(y_true, y_pred):
-            
             loss_square = tf.square(y_true - y_pred)
+            
             if self.mask is not None:
-                mask = tf.cast(self.mask,tf.float32)
+                mask = tf.cast(self.mask, loss_square.dtype)
                 loss_square *= tf.expand_dims(mask,axis=-1)
+            
+            if self.sample_weight is not None:
+                self.sample_weight = tf.cast(self.sample_weight, loss_square.dtype)
+                loss_square *= self.sample_weight
+                
             colwise_mse = tf.reduce_mean(loss_square, axis=(0, 1))
             if self.class_weight is not None:
-                # assert len(colwise_mse) == len(self.class_weight)
                 colwise_mse *= self.class_weight
             
             mask_shape = tf.shape(mask)
@@ -164,6 +170,11 @@ class RNAPredictionModel(tf.keras.Model):
             if self.mask is not None:
                 mask = tf.cast(self.mask,tf.float32)
                 loss_square *= tf.expand_dims(mask,axis=-1)
+            
+            if self.sample_weight is not None:
+                self.sample_weight = tf.cast(self.sample_weight, loss_square.dtype)
+                loss_square *= self.sample_weight
+            
             mse = tf.reduce_mean(loss_square)
 
             mask_shape = tf.shape(mask)
@@ -174,16 +185,43 @@ class RNAPredictionModel(tf.keras.Model):
 
         return mse(y_true, y_pred)
 
+    def extract_sample_weight(self, node_feat):
+        '''By convention, assuming that sample_weight are in the idx:(-2) 
+        attribute of node_features. Note that idx:(-1) is always "graph mask"
+        
+        Remember that node_feats are of dim (BATCH, Seq_len, n_features)
+        sample_weight is of (BATCH, Seq_len, 1)
+        '''
+        
+        sample_weight = tf.math.sqrt(node_feat[:,:,-2])
+        sample_weight = sample_weight[..., None]
+        # fix zero of batch padding, but this fix should have no effect due to self.mask in loss calculation
+#         sample_weight = tf.where(sample_weight==0.0, 1.0, 1.0)
+        
+        graph_mask_feat = node_feat[:,:,-1]
+        node_feat_pure = tf.concat([ node_feat[:,:,:-2] , graph_mask_feat[...,None]],axis=-1)
+        
+        nf_shape = tf.shape(node_feat)
+        sample_weight = tf.ensure_shape(sample_weight, [None, None, 1])
+#         node_feat_pure = tf.ensure_shape(node_feat_pure, [nf_shape[0], nf_shape[1], nf_shape[2] - self.n_error_bar])
+        
+        return node_feat_pure, sample_weight 
+    
     def call(self, x):
         self.mask = self.body_model.graphmask.compute_mask(x[0])
-        node_embed = self.body_model(x)
+        node_feat, edge_feat = x
+        
+        if self.sample_weight_flag: # if sample_weight is used, it's assumed to be a feature "exactly" one before mask feature
+            node_feat, self.sample_weight = self.extract_sample_weight(node_feat)
+            
+        node_embed = self.body_model([node_feat, edge_feat])
         out = self.final_dense(node_embed)
         return out
 
     @tf.function
     def train_step(self, data):
-
         x, y = data
+
         with tf.GradientTape() as tape:
             y_pred = self(x, training=True)  # Forward pass
             loss = self.compiled_loss(y, y_pred)
@@ -196,7 +234,6 @@ class RNAPredictionModel(tf.keras.Model):
 
     @tf.function
     def test_step(self, data):
-
         x, y = data
         y_pred = self(x, training=False)  # Forward pass
 
