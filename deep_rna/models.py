@@ -174,8 +174,9 @@ class RNAPredictionModel(tf.keras.Model):
 
         return mse(y_true, y_pred)
 
-    def call(self, inputs):
-        node_embed = self.body_model(inputs)
+    def call(self, x):
+        self.mask = self.body_model.graphmask.compute_mask(x[0])
+        node_embed = self.body_model(x)
         out = self.final_dense(node_embed)
         return out
 
@@ -183,8 +184,6 @@ class RNAPredictionModel(tf.keras.Model):
     def train_step(self, data):
 
         x, y = data
-        self.mask = self.body_model.graphmask.compute_mask(x[0])
-
         with tf.GradientTape() as tape:
             y_pred = self(x, training=True)  # Forward pass
             loss = self.compiled_loss(y, y_pred)
@@ -199,7 +198,6 @@ class RNAPredictionModel(tf.keras.Model):
     def test_step(self, data):
 
         x, y = data
-        self.mask = self.body_model.graphmask.compute_mask(x[0])
         y_pred = self(x, training=False)  # Forward pass
 
         self.compiled_loss(y, y_pred)
