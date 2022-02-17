@@ -3,10 +3,7 @@ import tensorflow.keras.layers as L
 from deep_rna.spektral.layers import GraphMasking, SimpleGCN
 
 class RNABodySmallModel(tf.keras.Model):
-    '''Input: Spektral's BatchLoader of [node_features, edge_features] 
-              there is a mask attached in node_features[:,:,-1:]
-       Output: Embeded Node Features of shape (batch, seq_len, hidden_dim)
-    '''
+    '''A small baseline RNA body model of 700K parameters resulted in decent RNA embedding'''
     def __init__(self, n_labels=5, hidden_dim=128, n_layers=2):
         super().__init__()
 
@@ -18,6 +15,11 @@ class RNABodySmallModel(tf.keras.Model):
         self.mask = None
 
     def call(self, inputs):
+        '''Input: Spektral's BatchLoader of [node_features, edge_features] 
+              there is a mask attached in node_features[:,:,-1:]
+           Output: Embeded Node Features of shape (batch, seq_len, hidden_dim)
+        '''
+
         node_inputs, edge_inputs = inputs
 
         edge_inputs = edge_inputs[..., 0] # use only the first edge feature at the moment
@@ -35,6 +37,7 @@ class RNABodySmallModel(tf.keras.Model):
         return node_embed
 
 class Conv1dBlock(tf.keras.layers.Layer):
+    '''Simplified OpenVaccine SOTA Recipe of Conv1d Block'''
     def __init__(self, kernel_size=3, strides=1,hidden_dim=128,drop_rate=0.25):
         super(Conv1dBlock, self).__init__()
         self.kernel_size = kernel_size
@@ -59,9 +62,10 @@ class Conv1dBlock(tf.keras.layers.Layer):
         return node_feat
     
 class RNABodyDeepModel(tf.keras.Model):
-    '''Input: Spektral's BatchLoader of [node_features, edge_features] 
-              there is a mask attached in node_features[:,:,-1:]
-       Output: Embeded Node Features of shape (batch, seq_len, hidden_dim)
+    '''A deep RNA body model of 6.8M parameters resulted in SOTA RNA embedding
+    This body model simplifies SOTA (ie. gold-solution) model used in OpenVaccine competition
+    i.e. https://www.kaggle.com/group16/covid-19-mrna-4th-place-solution
+    but still provide a competitive embeding quality.
     '''
     def __init__(self, n_labels=5, hidden_dim=128, n_layers=2, n_edge_features=5):
         super().__init__()
@@ -79,7 +83,7 @@ class RNABodyDeepModel(tf.keras.Model):
         self.concat = L.Concatenate()
         self.mask = None
         
-        # OpenVaccine Recipe
+        # Simplified OpenVaccine SOTA Recipe
         self.conv_block6 = Conv1dBlock(kernel_size=6, hidden_dim=64,drop_rate=0.0)
         self.conv_block15 = Conv1dBlock(kernel_size=15, hidden_dim=32,drop_rate=0.0)
         self.conv_block30 = Conv1dBlock(kernel_size=30, hidden_dim=16,drop_rate=0.0)
@@ -89,6 +93,11 @@ class RNABodyDeepModel(tf.keras.Model):
         self.norm_layer2 = L.LayerNormalization()
         
     def call(self, inputs):
+        '''
+        Input: Spektral's BatchLoader of [node_features, edge_features] 
+              there is a mask attached in node_features[:,:,-1:]
+        Output: Embeded Node Features of shape (batch, seq_len, hidden_dim)
+        '''
         node_inputs, edge_inputs = inputs
 
         node_inputs = self.graphmask(node_inputs)
@@ -126,6 +135,20 @@ class RNABodyDeepModel(tf.keras.Model):
         return node_embed
     
 class RNAPredictionModel(tf.keras.Model):
+    ''' Prediction "head" model which support both "small" and "deep" bodies i.e.
+    RNABodySmallModel and RNABodyDeepModel respectively. 
+    This class define "dynamic masked loss" e.g. self.dynamic_masked_mcrmse,
+    to support a batch consisting of RNAs of various length. 
+    (all RNAs will be padded to have the same length as the longest one in the batch)
+    The dynamic masked loss  will ignore the loss of padded RNAs in each batch.
+    
+    Arguments:
+    body_model : an instance of either RNABodySmallModel or RNABodyDeepModel class
+    n_labels : number of labels to predict
+    activation : activation function of the final prediction layer
+    class_weight (optional) : a list of "n_labels" element corresponding to each label's weight.
+                              If class_weight is None, equal weight will be used.
+    '''
     def __init__(self, body_model, n_labels=5, activation='linear', class_weight = None, sample_weight_flag=False):
         super().__init__()
 
@@ -242,30 +265,41 @@ class RNAPredictionModel(tf.keras.Model):
         return {m.name: m.result() for m in self.metrics}
 
 def RNAPretrainedModel(
-                 model_size='small',
+                 model_size='deep',
                  include_top=True, 
                  weights='openvaccine', 
                  n_labels=5,
                  activation='linear',
                  class_weight=None):
-
-    small_model_url = "https://drive.google.com/u/0/uc?id=1Yyc_143ZQeTaCVcTCDv-WQjw6NZ8j0FT&export=download"
-
+    ''' A function to load pretrained deep model (6.8M parameters)
+    Arguments are in standard keras format.
+    '''
+    
     assert model_size == 'small' or model_size == 'deep'
     assert n_labels > 1
 
     if model_size == 'small':
         model_body = RNABodySmallModel()
-        n_features = 14 # speficiation of the pretrained model
-        input_shape = [(None, None, n_features), (None, None, None, None)] 
-
+        model_url = "https://drive.google.com/u/0/uc?id=1Yyc_143ZQeTaCVcTCDv-WQjw6NZ8j0FT&export=download"
+        n_node_features = 14 # speficiation of the pretrained model
+        n_edge_features = 3
+        file_path = tf.keras.utils.get_file(fname='model_small.h5',origin=model_url)
+    else:
+        print('loading deep model...')
+        model_body = RNABodyDeepModel()
+        model_url = "https://drive.google.com/u/0/uc?id=1zTRijMYq1maCWBr42kikFh3Qh9KBQVuE&export=download"
+        n_node_features = 23 # speficiation of the pretrained model
+        n_edge_features = 5
+        file_path = tf.keras.utils.get_file(fname='model_deep.h5',origin=model_url)
+        
+    input_shape = [(None, None, n_node_features), (None, None, None,n_edge_features)] 
     if weights is not None:
         model_prediction = RNAPredictionModel(model_body, n_labels=5, activation=activation,class_weight=class_weight)
         model_prediction.build(input_shape = input_shape)
 
-        file_path = tf.keras.utils.get_file(fname='model.h5',origin=small_model_url)
-        model_prediction.load_weights(file_path)
-        print('load pretrained open-vaccine weights successfully....!')
+        if model_size == 'deep': # small model has no good pretrained weights
+            model_prediction.load_weights(file_path)
+            print('load pretrained open-vaccine weights successfully....!')
 
         if n_labels != 5: # change head, but with pretrained body
             print('Note that since the n_labels is different from OpenVaccine classes, the prediction dense will be fresh with random weights.')
