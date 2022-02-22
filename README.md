@@ -24,6 +24,9 @@ Kaggle working environment is amazing!
 <img src=https://i.ibb.co/8mkQ1vh/RNA-data-preprocessing.png width="600">
 
 
+## Benchmark Results
+Prediction provided by our tutorial is, as of Feb 2022, provided the highest scores in OpenVaccine's public notebooks (see [Benchmark in this page](https://www.kaggle.com/c/stanford-covid-vaccine/code?competitionId=22111&sortBy=scoreAscending) )
+
 ## Quick Start in 4 Steps
 **Step 1.** Clone the repo to your working directory
 ```
