@@ -1,10 +1,10 @@
-# DeepRNA - Easy &amp; Pretrained SOTA Deep Learning for RNA predictions
+# DeepRNA - Easy &amp; Pretrained Deep Learning for RNA predictions
 <img src=https://i.ibb.co/TmJ2k5S/RNABody-Model.png width="600">
 Implemented with Tensorflow 2.X with Keras API
 
 ## **Features**
 
-* SOTA architecture inspired by winning models in [mRNA OpenVaccine competition (2020)](https://www.kaggle.com/c/stanford-covid-vaccine) 
+* Architecture inspired by winning models in [mRNA OpenVaccine competition (2020)](https://www.kaggle.com/c/stanford-covid-vaccine) 
 * Pretrained DeepRNA models, easy to use, Keras-style
 * Applicable to general RNA prediction problems
 * Built-in Dataset with can handle RNA of mixed lengths simultaneously (powered by [Spektral's Graph Loader](https://github.com/danielegrattarola/spektral) with little upgrade ;)
@@ -25,7 +25,7 @@ Kaggle working environment is amazing!
 
 
 ## Benchmark Results
-Prediction provided by our tutorial is, as of Feb 2022, provided the highest scores in OpenVaccine's public notebooks (see [Benchmark in this page](https://www.kaggle.com/c/stanford-covid-vaccine/code?competitionId=22111&sortBy=scoreAscending) )
+Prediction provided by our tutorial is, as of Feb 2022, provided the highest scores in OpenVaccine's public notebooks (see [Benchmark in this page](https://www.kaggle.com/c/stanford-covid-vaccine/code?competitionId=22111&sortBy=scoreAscending) ). Note that in Kaggle benchmark, techniques such as multi-model and kfolds ensemble are standard)
 
 ## Quick Start in 4 Steps
 **Step 1.** Clone the repo to your working directory
