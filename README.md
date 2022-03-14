@@ -1,6 +1,8 @@
 # DeepRNA - Easy &amp; Pretrained Deep Learning for RNA predictions
 <img src=https://i.ibb.co/TmJ2k5S/RNABody-Model.png width="600">
-Implemented with Tensorflow 2.X with Keras API
+Implemented with Tensorflow 2.X with Keras API 
+
+[![Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://www.kaggle.com/ratthachat/tutorial-pretrained-sota-deeprna-model-made-easy)
 
 ## **Features**
 
